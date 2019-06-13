@@ -2,7 +2,7 @@
 #include "RadioFunctions.h"
 
 char messages[6][24];
-char command[24] = "> ";
+char command[24] = ">                      ";
 char netbuff[24] = "";
 int curs = 2;
 int ncurs = 0;

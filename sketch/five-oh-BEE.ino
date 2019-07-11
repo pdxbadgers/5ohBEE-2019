@@ -4,7 +4,7 @@
 char messages[6][24];
 char command[24] = ">                      ";
 char netbuff[24] = "";
-int curs = 2;
+unsigned int curs = 2;
 int ncurs = 0;
 int row=0;
 
@@ -72,7 +72,8 @@ void loop() {
   byte k = SRXEGetKey();
   if(k)
   {
-    if(k==3)
+    // submit on "return" (key right of 'Sym', box line box)
+    if(k==0x0D)
     {
       if(curs>3)
       {
@@ -92,9 +93,22 @@ void loop() {
     else
     {
       //sprintf(command,"> %d",k);
-    
-      command[curs]=k;
-      curs = (curs+1)%24;
+      //sprintf(command,"> %02X",k);
+      
+      if(k >= 0x20 && k <= 0x7A){
+        //is it printable?
+        command[curs]=k;
+        //curs = (curs+1)%24;
+        if(curs < 22) {
+          curs++;
+        }
+      }else if(k == 0x08){
+        // backspace?
+        if(curs > 2){
+          curs--;
+        }
+        command[curs] = 0x20; //space is your blank character
+      }
     }
   }
   redraw();

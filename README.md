@@ -1,4 +1,4 @@
-5ohBEE
+5ohBEE <img src="50bee.png" width="200px" alt="bee art by https://github.com/ivycraft">
 ======
 
 Setting up your Board

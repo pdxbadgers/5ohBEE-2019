@@ -1,38 +1,39 @@
 #include <SmartResponseXE.h>
 #include "RadioFunctions.h"
 #include <EEPROM.h>
-#include <avr/sleep.h>
 
-char messages[6][24];
-char command[32] = "$                      \x00R05e\x00";
+char messages[6][26];
+char command[32] = ">                      \x00R05e\x00";
 char netbuff[24] = "";
-char myname[5];
 unsigned int curs = 2;
 int ncurs = 0;
 int row=0;
 uint8_t canaryOffset = 27;
-bool sleeping=false;
 
+int time_loop=0;
 
 // Operation mode constants
-#define CONST_MODE_CHAT 0
-#define CONST_MODE_HEX  1
-#define CONST_MODE_RSSI 2
+#define CONST_MODE_CONSOLE  0
+#define CONST_MODE_HEX      1
+#define CONST_MODE_RSSI     2
+#define CONST_MODE_CHAT     3
 
 // Special keyboard constants
 #define CONST_KEY_CLEAR 0xF8
 #define CONST_KEY_EXIT  0xF9
 
 // EEPROM constants
-#define CONST_MEM_NAME 0x00000010
+#define CONST_MEM_NAME 0x00000000
 
 struct global_t{
-  int mode = CONST_MODE_CHAT;
-  char command[26] = "#                      ";
+  int mode = CONST_MODE_CONSOLE;
+  char command[26] = ">                      ";
   char canary[5] = "R05e";
   uint8_t name[256];
   uint16_t hexdumpaddr;
   uint32_t rfChannel;
+  uint8_t rows;         // screen rows
+  uint8_t columns;      // screen columns
 } global;
 
 void reset(){
@@ -44,60 +45,33 @@ void reset(){
 void setup() {
   // put your setup code here, to run once:
   SRXEInit(0xe7, 0xd6, 0xa2); // initialize display
-  //SRXEWriteString(0,120,global.command, FONT_LARGE, 3, 0); // draw large black text at x=0,y=120, fg=3, bg=0
-  strcpy(messages[0], "");
-  strcpy(messages[1], "");
-  strcpy(messages[2], "");
-  strcpy(messages[3], "");
-  strcpy(messages[4], "");
-  strcpy(messages[5], "");
-  global.mode = CONST_MODE_CHAT;
+  SRXEWriteString(0,120,global.command, FONT_LARGE, 3, 0); // draw large black text at x=0,y=120, fg=3, bg=0
+  global.rows = 6;
+
+  for(int i = 0; i < global.rows; i++){
+    strcpy(messages[i], "                        ");
+  }
+  resetInputBuffer();
+  global.mode = CONST_MODE_CONSOLE;
   global.rfChannel = 11;
+  
   rfBegin(global.rfChannel);
 
-  myname[0]==NULL;
-  //readName();
-  byte k;
-  char newname[5]; 
-  memset(newname,0,5);
+  // Device is ready to go; check if this was a reboot or new use
+  strcpy((char*)global.name, "uninitialized");
+  setName("Bob");   // uncomment this for testing
+  //reset();
   readName();
-  if(myname[0]==NULL)
-  {
-
-    SRXEWriteString(0,60,"Hello kind traveller.", FONT_MEDIUM, 3, 0);
-    SRXEWriteString(0,80,"Please tell me your name.", FONT_MEDIUM, 3, 0);
-
-    while(true)
-    {
-      k = SRXEGetKey();
-      if(!k)continue;
-
-      if(k==3)
-      {
-        setName(newname);
-        readName();
-        break;
-      }
-
-      if(k >= 0x20 && k <= 0x7A)
-      {
-        newname[strlen(newname)]=k;
-      }
-      
-      if(strlen(newname)>3)
-      {
-        memset(newname,0,5);
-        SRXEWriteString(0,100,"THREE CHARACTERS MAX!  ", FONT_MEDIUM, 3, 0);
-      }
-
-      SRXEWriteString(0,120,newname, FONT_MEDIUM, 3, 0);
-    }
-    
+  if(global.name[0]==NULL){
+    // device is unininitialized
+    submit("Hello!");
+    submit("What is your name?");
+    // TODO: fall into limited mode waiting for username and write to EEPROM
   }
 }
 
 void clearScreen(){
-  for(int i = 0; i < 6; i++){ submit("                       "); }
+  for(int i = 0; i < global.rows; i++){ submit("                       "); }
   row = 0;
 }
 
@@ -106,26 +80,23 @@ void readName()
   for(int i = 0; i < 4; i++)
   {
     char nameByte = EEPROM.read(CONST_MEM_NAME+i);
-    if(nameByte >= 0x20 && nameByte <= 0x7A){
-      myname[i] = nameByte;
+    if(nameByte >= 0x20 && nameByte <= 0x7A)
+    {
+      global.name[i] = nameByte;
       //break;
     }
     else
     {
-      myname[i] = 0x00;
+      global.name[i] = 0x00;
     }
   }
+  global.name[4]=0;
 }
 
 void setName(char *name)
 {
-  for(int i = 0; i < 256; i++)
+  for(int i = 0; i < 4; i++)
   {
-    if(name[i] == 0x20)
-    {
-      name[i] = 0x00; // no spaces
-    }
-    
     EEPROM.write(CONST_MEM_NAME+i,name[i]);
     if(name[i] == 0x00)
     {
@@ -134,16 +105,21 @@ void setName(char *name)
   }
 }
 
+void resetInputBuffer()
+{
+  memcpy(global.command, ">                      ",26);
+  curs = 2;
+}
+
 void redraw()
 {
-  SRXEWriteString(0,0  ,messages[(0+row)%6], FONT_MEDIUM, 3, 0);
-  SRXEWriteString(0,20 ,messages[(1+row)%6], FONT_MEDIUM, 3, 0);   
-  SRXEWriteString(0,40 ,messages[(2+row)%6], FONT_MEDIUM, 3, 0);
-  SRXEWriteString(0,60 ,messages[(3+row)%6], FONT_MEDIUM, 3, 0);
-  SRXEWriteString(0,80 ,messages[(4+row)%6], FONT_MEDIUM, 3, 0);
-  SRXEWriteString(0,100,messages[(5+row)%6], FONT_MEDIUM, 3, 0); 
-
-  SRXEWriteString(0,120,global.command, FONT_MEDIUM, 3, 0);
+  SRXEWriteString(0,0  ,messages[(0+row)%global.rows], FONT_LARGE, 3, 0);
+  SRXEWriteString(0,20 ,messages[(1+row)%global.rows], FONT_LARGE, 3, 0);   
+  SRXEWriteString(0,40 ,messages[(2+row)%global.rows], FONT_LARGE, 3, 0);
+  SRXEWriteString(0,60 ,messages[(3+row)%global.rows], FONT_LARGE, 3, 0);
+  SRXEWriteString(0,80 ,messages[(4+row)%global.rows], FONT_LARGE, 3, 0);
+  SRXEWriteString(0,100,messages[(5+row)%global.rows], FONT_LARGE, 3, 0); 
+  SRXEWriteString(0,120,global.command, FONT_LARGE, 3, 0);
 }
 
 void handleInput(char* cmd)
@@ -171,7 +147,7 @@ void handleInput(char* cmd)
       item = strtok(NULL, " ");
       if(item){
         if(!memcmp(item,"name",4)){
-          submit((char*)myname);
+          submit((char*)global.name);
         }else{
           submit("Item not recognized");
         }
@@ -179,7 +155,7 @@ void handleInput(char* cmd)
         submit("Malformed");
       }
     }
-  }else if(!memcmp(cmd,"hex",3)){
+    }else if(!memcmp(cmd,"hex",3)){
     global.mode = CONST_MODE_HEX;
     global.hexdumpaddr = 0;
     // fill the first 6 lines of the screen
@@ -190,11 +166,10 @@ void handleInput(char* cmd)
     }
   }else if(!memcmp(cmd,"rssi",4)){
     global.mode = CONST_MODE_RSSI;
-  }else if(!memcmp(cmd,"sleep",5)){
-    SRXESleep();
-  }else if(!memcmp(cmd,"wannahug",9)){
-    SRXERectangle(10,10,100,100, 3, 1);
-    delay(1000);
+  }else if(!memcmp(cmd,"chat",4)){
+    global.mode = CONST_MODE_CHAT;
+    global.rfChannel = 11;
+    rfBegin(global.rfChannel);
   }else if(!memcmp(cmd,"help",4)){
     submit("there is no help");
   }else{
@@ -203,14 +178,15 @@ void handleInput(char* cmd)
 }
 
 // submit(char*)
-//  Prints the designated string to the screen buffer and forces a readraw
+//  Prints the designated string to the screen buffer and forces a redraw
 void submit(char* submission)
 {  
-  strcpy(messages[row],"                       ");
-  strncpy(messages[row],submission, 24);
-  row = (row+1)%6;
+  memcpy(messages[row],"                       ",24);
+  messages[row][24]=0;
+  memcpy(messages[row],submission, 24);
+  row = (row+1)%global.rows;
   //checkCanary();
-  //resetInputBuffer();
+  resetInputBuffer();
   redraw();
 }
 
@@ -236,6 +212,23 @@ void readHexLine(uint32_t addr)
   submit(bar);
 }
 
+void updateInputBuffer(byte k){
+  if(k >= 0x20 && k <= 0x7A){
+    //is it printable?
+    global.command[curs]=k;
+    //curs = (curs+1)%24;
+    if(curs < 31){  //22) {
+      curs++;
+    }
+  }else if(k == 0x08){
+    // backspace?
+    if(curs > 2){
+      curs--;
+    }
+    global.command[curs] = 0x20; //space is your blank character
+  }
+}
+
 // mode_hex_loop(byte)
 //  This is the loop function for when the device is in hex-dump mode.
 //  TODO:
@@ -250,50 +243,62 @@ void mode_hex_loop(byte k){
   }
 }
 
-// mode_chat_loop(byte)
-//  This is the loop function for when the device is in chat (default) mode
-void mode_chat_loop(byte k){
+// mode_console_loop(byte)
+//  This is the loop function for when the device is in console (default) mode
+void mode_console_loop(byte k){
+  if(k){
+    // submit on "return" (key right of 'Sym', box line box)
+    if(k==0x0D || k==0x03)
+    {
+      if(curs>3)
+      {
+        handleInput(global.command+2);
+        resetInputBuffer();
+      }
+    }else{
+      //update input buffer
+      updateInputBuffer(k);
+    }
+  }
+}
+
+// mode_chat_loop(byte,byte)
+//  First byte is input from the radio, second byte is from the keyboard.  Update the screen accordingly.
+void mode_chat_loop(byte r,byte k){
+  if(r){  
+    if(r==3)
+    {
+      submit(netbuff);
+      strcpy(netbuff, "                       ");
+      ncurs = 0;
+    }
+    else
+    {    
+      netbuff[ncurs]=r;
+      ncurs = (ncurs+1)%24;
+    } 
+  }
+  
   if(k)
   {
     // submit on "return" (key right of 'Sym', box line box)
     if(k==0x0D)
     {
-      if(curs>3)
+      if(curs>2)
       {
-      //submit(global.command+2);
-      handleInput(global.command+2);
-     
-      // transmit
-      for(int i=2;i<curs;++i)
-      {
-        rfWrite(global.command[i]); 
-      }
-      rfWrite(3); // write the last byte
+        // transmit
+        for(int i=2;i<curs;++i) {
+          rfWrite(global.command[i]); 
+        }
+        rfWrite(3); // write the last byte
+        submit(global.command+2);
       }
 
       //checkCanary();
-      
-//      resetInputBuffer();
-      memcpy(global.command, ">                      ",26);//canaryOffset-1);
-      curs = 2;
-    }
-    else
-    {
-      
-      if(k >= 0x20 && k <= 0x7A){
-        //is it printable?
-        global.command[curs]=k;
-        //curs = (curs+1)%24;
-        if(curs < 31){  //22) {
-          curs++;
-        }
-      }else if(k == 0x08){
-        // backspace?
-        if(curs > 2){
-          curs--;
-        }
-        global.command[curs] = 0x20; //space is your blank character
-      }
+      resetInputBuffer();
+    }else{
+      //update input buffer
+      updateInputBuffer(k);
     }
   }
 }
@@ -317,15 +322,9 @@ void mode_rssi_loop(){
   if(rfAvailable())
   {
     while(0>rfRead()){} // burn through the reads
-    //snprintf(buf,24,"Ch %d : %d   ",i,rssiRaw);
-    //submit(buf);
   }
-  //else
-  //{
-    snprintf(buf,24,"Ch %d: %d  ",i,rssiRaw);
-  //  submit(buf);
-  //}
-
+  snprintf(buf,24,"Ch %d: %d  ",i,rssiRaw);
+  
   global.rfChannel++;
   i = global.rfChannel;
   
@@ -352,31 +351,26 @@ void mode_rssi_loop(){
 
 void loop() {
 
+  time_loop+=1;
+  if(time_loop>1000) // maybe a minute or so?
+  {
+    time_loop=0;
+    SRXESleep(); 
+  }
+
+  
   // if we hear something on the radio, build up the net buffer
+  byte n = NULL;
   if (rfAvailable())  
   {
-    byte n = rfRead();
-    if(n)
-    {   
-      if(n==3)
-      {
-        submit(netbuff);
-        strcpy(netbuff, "                       ");
-        ncurs = 0;
-      }
-      else
-      {    
-        netbuff[ncurs]=n;
-        ncurs = (ncurs+1)%24;
-      }
-    }
+    n = rfRead();
   }
 
   // otherwise, just take data from the keyboard
   byte k = SRXEGetKey();
   if(k){
     if(k == CONST_KEY_EXIT){
-      global.mode = CONST_MODE_CHAT;
+      global.mode = CONST_MODE_CONSOLE;
     }else if(k == CONST_KEY_CLEAR){
       clearScreen();
       k = NULL;   // prevents subprograms from operating on this input
@@ -393,8 +387,11 @@ void loop() {
       mode_rssi_loop();
       break;
     case CONST_MODE_CHAT:
+      mode_chat_loop(n,k);
+      break;
+    case CONST_MODE_CONSOLE:
     default:
-      mode_chat_loop(k);
+      mode_console_loop(k);
   }
   redraw();
 }

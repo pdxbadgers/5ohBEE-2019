@@ -1,14 +1,18 @@
 #include <SmartResponseXE.h>
 #include "RadioFunctions.h"
 #include <EEPROM.h>
+#include <avr/sleep.h>
 
 char messages[6][24];
-char command[32] = ">                      \x00R05e\x00";
+char command[32] = "$                      \x00R05e\x00";
 char netbuff[24] = "";
+char myname[5];
 unsigned int curs = 2;
 int ncurs = 0;
 int row=0;
 uint8_t canaryOffset = 27;
+bool sleeping=false;
+
 
 // Operation mode constants
 #define CONST_MODE_CHAT 0
@@ -20,11 +24,11 @@ uint8_t canaryOffset = 27;
 #define CONST_KEY_EXIT  0xF9
 
 // EEPROM constants
-#define CONST_MEM_NAME 0x00000000
+#define CONST_MEM_NAME 0x00000010
 
 struct global_t{
   int mode = CONST_MODE_CHAT;
-  char command[26] = ">                      ";
+  char command[26] = "#                      ";
   char canary[5] = "R05e";
   uint8_t name[256];
   uint16_t hexdumpaddr;
@@ -40,28 +44,55 @@ void reset(){
 void setup() {
   // put your setup code here, to run once:
   SRXEInit(0xe7, 0xd6, 0xa2); // initialize display
-  SRXEWriteString(0,120,global.command, FONT_LARGE, 3, 0); // draw large black text at x=0,y=120, fg=3, bg=0
+  //SRXEWriteString(0,120,global.command, FONT_LARGE, 3, 0); // draw large black text at x=0,y=120, fg=3, bg=0
   strcpy(messages[0], "");
   strcpy(messages[1], "");
   strcpy(messages[2], "");
   strcpy(messages[3], "");
   strcpy(messages[4], "");
   strcpy(messages[5], "");
-  resetInputBuffer();
   global.mode = CONST_MODE_CHAT;
   global.rfChannel = 11;
   rfBegin(global.rfChannel);
 
-  // Device is ready to go; check if this was a reboot or new use
-  strcpy((char*)global.name, "uninitialized");
-  //setName("Bob");   // uncomment this for testing
-  //reset();
+  myname[0]==NULL;
+  //readName();
+  byte k;
+  char newname[5]; 
+  memset(newname,0,5);
   readName();
-  if(global.name[0]==NULL){
-    // device is unininitialized
-    submit("Hello!");
-    submit("What is your name?");
-    // TODO: fall into limited mode waiting for username and write to EEPROM
+  if(myname[0]==NULL)
+  {
+
+    SRXEWriteString(0,60,"Hello kind traveller.", FONT_MEDIUM, 3, 0);
+    SRXEWriteString(0,80,"Please tell me your name.", FONT_MEDIUM, 3, 0);
+
+    while(true)
+    {
+      k = SRXEGetKey();
+      if(!k)continue;
+
+      if(k==3)
+      {
+        setName(newname);
+        readName();
+        break;
+      }
+
+      if(k >= 0x20 && k <= 0x7A)
+      {
+        newname[strlen(newname)]=k;
+      }
+      
+      if(strlen(newname)>3)
+      {
+        memset(newname,0,5);
+        SRXEWriteString(0,100,"THREE CHARACTERS MAX!  ", FONT_MEDIUM, 3, 0);
+      }
+
+      SRXEWriteString(0,120,newname, FONT_MEDIUM, 3, 0);
+    }
+    
   }
 }
 
@@ -72,14 +103,17 @@ void clearScreen(){
 
 void readName()
 {
-  for(int i = 0; i < 256; i++)
+  for(int i = 0; i < 4; i++)
   {
     char nameByte = EEPROM.read(CONST_MEM_NAME+i);
-    if(nameByte == 0xFF || nameByte == 0x00){
-      global.name[i] = 0x00;
-      break;
+    if(nameByte >= 0x20 && nameByte <= 0x7A){
+      myname[i] = nameByte;
+      //break;
     }
-    global.name[i] = nameByte;
+    else
+    {
+      myname[i] = 0x00;
+    }
   }
 }
 
@@ -100,28 +134,16 @@ void setName(char *name)
   }
 }
 
-void resetInputBuffer()
-{
-  /*memcpy(command,">",1);
-  memcpy(command+1," ",30);
-  memcpy(command+27,"R05e",4);
-  memcpy(command+31,0x00,1);
-  memcpy(command+25,0x00,1);*/
-  
-  //memcpy(command, ">                      \x00R05e\x00",26);
-  memcpy(global.command, ">                      ",26);
-}
-
 void redraw()
 {
-  SRXEWriteString(0,0  ,messages[(0+row)%6], FONT_LARGE, 3, 0);
-  SRXEWriteString(0,20 ,messages[(1+row)%6], FONT_LARGE, 3, 0);   
-  SRXEWriteString(0,40 ,messages[(2+row)%6], FONT_LARGE, 3, 0);
-  SRXEWriteString(0,60 ,messages[(3+row)%6], FONT_LARGE, 3, 0);
-  SRXEWriteString(0,80 ,messages[(4+row)%6], FONT_LARGE, 3, 0);
-  SRXEWriteString(0,100,messages[(5+row)%6], FONT_LARGE, 3, 0); 
+  SRXEWriteString(0,0  ,messages[(0+row)%6], FONT_MEDIUM, 3, 0);
+  SRXEWriteString(0,20 ,messages[(1+row)%6], FONT_MEDIUM, 3, 0);   
+  SRXEWriteString(0,40 ,messages[(2+row)%6], FONT_MEDIUM, 3, 0);
+  SRXEWriteString(0,60 ,messages[(3+row)%6], FONT_MEDIUM, 3, 0);
+  SRXEWriteString(0,80 ,messages[(4+row)%6], FONT_MEDIUM, 3, 0);
+  SRXEWriteString(0,100,messages[(5+row)%6], FONT_MEDIUM, 3, 0); 
 
-  SRXEWriteString(0,120,global.command, FONT_LARGE, 3, 0);
+  SRXEWriteString(0,120,global.command, FONT_MEDIUM, 3, 0);
 }
 
 void handleInput(char* cmd)
@@ -149,7 +171,7 @@ void handleInput(char* cmd)
       item = strtok(NULL, " ");
       if(item){
         if(!memcmp(item,"name",4)){
-          submit((char*)global.name);
+          submit((char*)myname);
         }else{
           submit("Item not recognized");
         }
@@ -168,6 +190,11 @@ void handleInput(char* cmd)
     }
   }else if(!memcmp(cmd,"rssi",4)){
     global.mode = CONST_MODE_RSSI;
+  }else if(!memcmp(cmd,"sleep",5)){
+    SRXESleep();
+  }else if(!memcmp(cmd,"wannahug",9)){
+    SRXERectangle(10,10,100,100, 3, 1);
+    delay(1000);
   }else if(!memcmp(cmd,"help",4)){
     submit("there is no help");
   }else{
@@ -183,7 +210,7 @@ void submit(char* submission)
   strncpy(messages[row],submission, 24);
   row = (row+1)%6;
   //checkCanary();
-  resetInputBuffer();
+  //resetInputBuffer();
   redraw();
 }
 
@@ -246,7 +273,7 @@ void mode_chat_loop(byte k){
 
       //checkCanary();
       
-      resetInputBuffer();
+//      resetInputBuffer();
       memcpy(global.command, ">                      ",26);//canaryOffset-1);
       curs = 2;
     }
@@ -324,6 +351,7 @@ void mode_rssi_loop(){
 }
 
 void loop() {
+
   // if we hear something on the radio, build up the net buffer
   if (rfAvailable())  
   {

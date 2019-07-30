@@ -49,7 +49,7 @@ void setup() {
   global.rows = 6;
 
   for(int i = 0; i < global.rows; i++){
-    strncpy(messages[i], "                        ");
+    strncpy(messages[i], "                        ",24);
   }
   resetInputBuffer();
   global.mode = CONST_MODE_CONSOLE;
@@ -58,13 +58,13 @@ void setup() {
   rfBegin(global.rfChannel);
 
   // Device is ready to go; check if this was a reboot or new use
-  strncpy((char*)global.name, "nop");
+  strncpy((char*)global.name, "nop",4);
   //setName("Bob");   // uncomment this for testing
   //reset();
   getName();
   if(global.name[0]==NULL){
     // device is unininitialized
-    submit("Hello!");
+    submit("Welcome to HugQuest v0.1");
     submit("What is your name?");
     // TODO: fall into limited mode waiting for username and write to EEPROM
   }
@@ -109,17 +109,24 @@ void resetInputBuffer()
 {
   memcpy(global.command, ">                      ",26);
   curs = 2;
+  SRXEWriteString(0,120,global.command, FONT_LARGE, 3, 0);
 }
 
 void redraw()
 {
+  SRXEWriteString(0,0  ,"                         ", FONT_LARGE, 3, 0);
+  SRXEWriteString(0,20 ,"                         ", FONT_LARGE, 3, 0);   
+  SRXEWriteString(0,40 ,"                         ", FONT_LARGE, 3, 0);
+  SRXEWriteString(0,60 ,"                         ", FONT_LARGE, 3, 0);
+  SRXEWriteString(0,80 ,"                         ", FONT_LARGE, 3, 0);
+  SRXEWriteString(0,100,"                         ", FONT_LARGE, 3, 0); 
+
   SRXEWriteString(0,0  ,messages[(0+row)%global.rows], FONT_LARGE, 3, 0);
   SRXEWriteString(0,20 ,messages[(1+row)%global.rows], FONT_LARGE, 3, 0);   
   SRXEWriteString(0,40 ,messages[(2+row)%global.rows], FONT_LARGE, 3, 0);
   SRXEWriteString(0,60 ,messages[(3+row)%global.rows], FONT_LARGE, 3, 0);
   SRXEWriteString(0,80 ,messages[(4+row)%global.rows], FONT_LARGE, 3, 0);
   SRXEWriteString(0,100,messages[(5+row)%global.rows], FONT_LARGE, 3, 0); 
-  SRXEWriteString(0,120,global.command, FONT_LARGE, 3, 0);
 }
 
 void handleInput(char* cmd)
@@ -183,11 +190,12 @@ void handleInput(char* cmd)
 
 // submit(char*)
 //  Prints the designated string to the screen buffer and forces a redraw
-void submit(char* submission)
+int submit(char* submission)
 {
   time_loop=0; // reset the sleep timer
-  if(strlen(submission)<3)return;
-  
+  if(strlen(submission)<3)return false;
+  if(strlen(submission)>24)return false;
+   
   memcpy(messages[row],"                       ",24);
   messages[row][24]=0;
   memcpy(messages[row],submission, 24);
@@ -234,6 +242,8 @@ void updateInputBuffer(byte k){
     }
     global.command[curs] = 0x20; //space is your blank character
   }
+
+  SRXEWriteString(0,120,global.command, FONT_LARGE, 3, 0);
 }
 
 // mode_hex_loop(byte)
@@ -367,10 +377,12 @@ void mode_rssi_loop(){
 void loop() {
 
   time_loop+=1;
-  if(time_loop>1000) // maybe a minute or so?
+  if(time_loop>100000) // maybe a minute or so?
   {
     time_loop=0;
-    SRXESleep(); 
+    SRXESleep();
+    redraw();
+    resetInputBuffer();
   }
 
   
@@ -408,5 +420,5 @@ void loop() {
     default:
       mode_console_loop(k);
   }
-  redraw();
+  //redraw();
 }

@@ -11,6 +11,7 @@ int row=0;
 uint8_t canaryOffset = 27;
 
 unsigned long int time_loop=0;
+unsigned long int tokens=0;
 
 // Operation mode constants
 #define CONST_MODE_CONSOLE  0
@@ -24,6 +25,7 @@ unsigned long int time_loop=0;
 
 // EEPROM constants
 #define CONST_MEM_NAME 0x0000000
+#define CONST_MEM_HUGS 0x0000100
 
 struct global_t{
   int mode = CONST_MODE_CONSOLE;
@@ -55,14 +57,18 @@ void setup() {
   global.rfChannel = 11;
   rfBegin(global.rfChannel);
 
+  char outbuff[26];
+
   // set up the name in memory
   if(getName())
   {
-    // TODO print hugs
-    submit("Welcome back!");
+    snprintf(outbuff,24,"Welcome back %s!",global.name);
+    submit(outbuff);
+
+    snprintf(outbuff,24,"You have %lu HUG tokens.",tokens);
+    submit(outbuff);
     submit("Press % or > to submit.");
   }
-
 }
 
 void clearScreen(){
@@ -72,7 +78,7 @@ void clearScreen(){
 
 int getName()
 {
-  char outbuff[24];
+  char outbuff[26];
 
   // flash is totally empty, welcome the new user!
   if(EEPROM.read(CONST_MEM_NAME)==255)
@@ -81,8 +87,13 @@ int getName()
     submit("What is your name?");
     submit("type 'set name <name>'");
     submit("Press % or > to submit.");
+
+    EEPROM.put(CONST_MEM_HUGS,(unsigned long)0);
     return false;
   }
+
+  // how many tokens we got?
+  EEPROM.get(CONST_MEM_HUGS,tokens);
   
   for(int i = 0; i < 4; i++)
   {
@@ -107,6 +118,12 @@ int getName()
 
 int setName(char *name)
 {
+  if(strlen(name)<0||strlen(name)>3)
+  {
+    submit("NAME MUST BE 1-3 CHARS!");
+    return false;
+  }
+  
   for(int i = 0; i < 4; i++)
   {
     EEPROM.write(CONST_MEM_NAME+i,name[i]);
@@ -116,6 +133,8 @@ int setName(char *name)
       break;
     }
   }
+
+  return true;
 }
 
 void resetInputBuffer()
@@ -154,10 +173,12 @@ void handleInput(char* cmd)
         if(item){
           if(!memcmp(item,"name",4)){
             item = strtok(NULL," ");
-            setName(item);
-            snprintf(outbuff,24,"Hello '%s', welcome!",item);
-            submit(outbuff);
-            getName();
+            if(setName(item))
+            {
+              snprintf(outbuff,24,"Hello '%s', welcome!",item);
+              submit(outbuff);
+            }
+            //getName();
           }else{
             submit("Item not recognized");
           }
@@ -170,13 +191,24 @@ void handleInput(char* cmd)
     if(item){
       item = strtok(NULL, " ");
       if(item){
-        if(!memcmp(item,"name",4)){
+        if(!memcmp(item,"name",4))
+        {
           getName();
           submit((char*)global.name);
-        }if(!memcmp(item,"timer",4)){
-          snprintf(outbuff,20,"Timer is at %ul",time_loop);
+        }
+        else if(!memcmp(item,"timer",5))
+        {
+          snprintf(outbuff,20,"Timer is at %lu",time_loop);
           submit(outbuff);
-        }else{
+        }
+        else if(!memcmp(item,"tokens",6))
+        {
+          snprintf(outbuff,24,"You have %lu HUG tokens.",tokens);
+          submit(outbuff);
+        }
+
+        else
+        {
           submit("Item not recognized");
         }
       }else{
@@ -213,6 +245,11 @@ void handleInput(char* cmd)
     rfWrite('g');
     rfWrite('\n'); // write the last byte
     submit("Hug sent!!");
+    if(tokens>0)
+    {
+      tokens=tokens-1;
+      EEPROM.put(CONST_MEM_HUGS,tokens);
+    }
   }
 
   // doesn't look like a command, so let's blast it to the chat!
@@ -314,7 +351,12 @@ void mode_console_loop(byte r, byte k){
     if(r=='\n')
     {
       // HERE IS WHERE WE ACCEPT COMMANDS FROM THE NETWORK
-      if(!memcmp(netbuff,"hug",3)){submit("OMG YOU'VE BEEN HUGGED!");}
+      if(!memcmp(netbuff,"hug",3))
+      {
+        submit("OMG YOU'VE BEEN HUGGED!");
+        tokens=tokens+1;
+        EEPROM.put(CONST_MEM_HUGS,tokens);
+      }
       else if(!memcmp(netbuff,"wannahug",8)){submit("OH NO HAX!");}
       else submit(netbuff);
       strncpy(netbuff,"                       ",24);

@@ -23,7 +23,7 @@ int time_loop=0;
 #define CONST_KEY_EXIT  0xF9
 
 // EEPROM constants
-#define CONST_MEM_NAME 0x00000000
+#define CONST_MEM_NAME 0x0000000
 
 struct global_t{
   int mode = CONST_MODE_CONSOLE;
@@ -37,8 +37,7 @@ struct global_t{
 } global;
 
 void reset(){
-  //EEPROM.write(CONST_MEM_NAME,0xFF);
-  setName("");
+  EEPROM.write(CONST_MEM_NAME,0xFF);
   getName();
 }
 
@@ -57,16 +56,12 @@ void setup() {
   
   rfBegin(global.rfChannel);
 
-  // Device is ready to go; check if this was a reboot or new use
-  strncpy((char*)global.name, "nop",4);
-  //setName("Bob");   // uncomment this for testing
-  //reset();
-  getName();
-  if(global.name[0]==NULL){
-    // device is unininitialized
-    submit("Welcome to HugQuest v0.1");
-    submit("What is your name?");
-    // TODO: fall into limited mode waiting for username and write to EEPROM
+  // set up the name in memory
+  if(getName())
+  {
+    // TODO print hugs
+    submit("Welcome back!");
+    submit("Press % or > to submit.");
   }
 }
 
@@ -75,11 +70,26 @@ void clearScreen(){
   row = 0;
 }
 
-void getName()
+int getName()
 {
+  char outbuff[24];
+
+  // flash is totally empty, welcome the new user!
+  if(EEPROM.read(CONST_MEM_NAME)==255)
+  {
+    submit("Welcome to HugQuest v0.1");
+    submit("What is your name?");
+    submit("type 'set name <name>'");
+    submit("Press % or > to submit.");
+    return false;
+  }
+  
   for(int i = 0; i < 4; i++)
   {
     char nameByte = EEPROM.read(CONST_MEM_NAME+i);
+    //snprintf(outbuff,20,"%d %02x %03d : %c",i,nameByte,nameByte,nameByte);
+    //submit(outbuff);
+
     if(nameByte >= 0x20 && nameByte <= 0x7A)
     {
       global.name[i] = nameByte;
@@ -91,13 +101,16 @@ void getName()
     }
   }
   global.name[4]=0;
+
+  return true;
 }
 
-void setName(char *name)
+int setName(char *name)
 {
   for(int i = 0; i < 4; i++)
   {
     EEPROM.write(CONST_MEM_NAME+i,name[i]);
+    global.name[i]=name[i];
     if(name[i] == 0x00)
     {
       break;
@@ -158,6 +171,7 @@ void handleInput(char* cmd)
       item = strtok(NULL, " ");
       if(item){
         if(!memcmp(item,"name",4)){
+          getName();
           submit((char*)global.name);
         }else{
           submit("Item not recognized");
@@ -183,6 +197,18 @@ void handleInput(char* cmd)
     rfBegin(global.rfChannel);
   }else if(!memcmp(cmd,"help",4)){
     submit("there is no help");
+  }else if(!memcmp(cmd,"resetforreals",13)){
+    reset();
+  }else if(!memcmp(cmd,"reset",5)){
+    submit("Try 'resetforreals'");
+  }else if(!memcmp(cmd,"ascii",4)){
+    char outbuff[24];
+    for(int x=0;x<256;++x)
+    {
+      snprintf(outbuff,20,"%02x %03d : %c",x,x,x);
+      delay(1000);
+      submit(outbuff);
+    }
   }else{
     submit(cmd);
   }
@@ -308,7 +334,7 @@ void mode_chat_loop(byte r,byte k){
       if(curs>2)
       {
         memset(outbuff,0,25);
-        snprintf(outbuff,24,"%s:%s.",global.name,global.command+2);
+        snprintf(outbuff,24,"%-3s:%s.",global.name,global.command+2);
  
         // transmit
         for(int i=0;i<curs+2;++i) {

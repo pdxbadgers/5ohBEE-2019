@@ -10,7 +10,7 @@ int ncurs = 0;
 int row=0;
 uint8_t canaryOffset = 27;
 
-int time_loop=0;
+unsigned long int time_loop=0;
 
 // Operation mode constants
 #define CONST_MODE_CONSOLE  0
@@ -173,6 +173,9 @@ void handleInput(char* cmd)
         if(!memcmp(item,"name",4)){
           getName();
           submit((char*)global.name);
+        }if(!memcmp(item,"timer",4)){
+          snprintf(outbuff,20,"Timer is at %ul",time_loop);
+          submit(outbuff);
         }else{
           submit("Item not recognized");
         }

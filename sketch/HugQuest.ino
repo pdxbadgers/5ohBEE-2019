@@ -1,244 +1,412 @@
-/* RadioFunctions.h
-  A handful of sending and receiving functions for the 
-  ATmega128RFA1.
-  by: Jim Lindblom
-      SparkFun Electronics
-  date: July 8, 2013
-  license: Beerware. Use, distribut, and modify this code freely
-  however you please. If you find it useful, you can buy me a beer
-  some day.
-  
-  Functions in here:
-    rfBegin(uint8_t channel) - Initializes the radio on a channel
-                                between 11 and 26.
-    rfWrite(uint8_t b) - Sends a byte over the radio.
-    rfPrint(String toPrint) - Sends a string over the radio.
-    int rfAvailable() - Returns number of characters currently
-                        in receive buffer, ready to be read.
-    char rfRead() - Reads a character out of the buffer.
-    
-  Interrupt Sub-Routines (ISRs) in here:
-    TRX24_TX_END_vect - End of radio transfer.
-    TRX24_RX_START_vect - Beginning of radio receive.
-    TRX24_RX_END_vect - End of radio receive. Characters are 
-                        collected into a buffer here.
-*/
-  
-#include <Arduino.h> // Required for digitalWrites, etc.
+#include <SmartResponseXE.h>
+#include "RadioFunctions.h"
+#include <EEPROM.h>
 
-// Board pin definitions.
-const int RX_LED = 34;  // B6 - RF RX LED
-const int TX_LED = 35;  // B7 - RF TX LED
-uint8_t rssiRaw; // Global variable shared between RX ISRs
+char messages[6][26];
+char command[32] = ">                      \x00R05e\x00";
+char netbuff[26] = "";
+unsigned int curs = 2;
+int ncurs = 0;
+int row=0;
+uint8_t canaryOffset = 27;
 
-// A buffer to maintain data being received by radio.
-const int RF_BUFFER_SIZE = 127;
-struct ringBuffer
-{
-  unsigned char buffer[RF_BUFFER_SIZE];
-  volatile unsigned int head;
-  volatile unsigned int tail;
-} radioRXBuffer;
+int time_loop=0;
 
+// Operation mode constants
+#define CONST_MODE_CONSOLE  0
+#define CONST_MODE_HEX      1
+#define CONST_MODE_RSSI     2
+#define CONST_MODE_CHAT     3
 
-// Initialize the RFA1's low-power 2.4GHz transciever.
-// Sets up the state machine, and gets the radio into
-// the RX_ON state. Interrupts are enabled for RX
-// begin and end, as well as TX end.
-uint8_t rfBegin(uint8_t channel)
-{
-  for (int i=0; i<128; i++)
-  {
-    radioRXBuffer.buffer[i] = 0;
+// Special keyboard constants
+#define CONST_KEY_CLEAR 0xF8
+#define CONST_KEY_EXIT  0xF9
+
+// EEPROM constants
+#define CONST_MEM_NAME 0x00000000
+
+struct global_t{
+  int mode = CONST_MODE_CONSOLE;
+  char command[26] = ">                      ";
+  char canary[5] = "R05e";
+  uint8_t name[256];
+  uint16_t hexdumpaddr;
+  uint32_t rfChannel;
+  uint8_t rows;         // screen rows
+  uint8_t columns;      // screen columns
+} global;
+
+void reset(){
+  //EEPROM.write(CONST_MEM_NAME,0xFF);
+  setName("");
+  getName();
+}
+
+void setup() {
+  // put your setup code here, to run once:
+  SRXEInit(0xe7, 0xd6, 0xa2); // initialize display
+  SRXEWriteString(0,120,global.command, FONT_LARGE, 3, 0); // draw large black text at x=0,y=120, fg=3, bg=0
+  global.rows = 6;
+
+  for(int i = 0; i < global.rows; i++){
+    strncpy(messages[i], "                        ");
   }
-  radioRXBuffer.tail = 0;
-  radioRXBuffer.head = 0;
-
-  // Setup RX/TX LEDs: These are pins B6/34 (RX) and B7/35 (TX).
-  pinMode(RX_LED, OUTPUT);
-  digitalWrite(RX_LED, LOW);
-  pinMode(TX_LED, OUTPUT);
-  digitalWrite(TX_LED, LOW);
-
-  // Transceiver Pin Register -- TRXPR.
-  // This register can be used to reset the transceiver, without
-  // resetting the MCU.
-  TRXPR |= (1<<TRXRST);   // TRXRST = 1 (Reset state, resets all registers)
-
-  // Transceiver Interrupt Enable Mask - IRQ_MASK
-  // This register disables/enables individual radio interrupts.
-  // First, we'll disable IRQ and clear any pending IRQ's
-  IRQ_MASK = 0;  // Disable all IRQs
+  resetInputBuffer();
+  global.mode = CONST_MODE_CONSOLE;
+  global.rfChannel = 11;
   
-  // Transceiver State Control Register -- TRX_STATE
-  // This regiseter controls the states of the radio.
-  // First, we'll set it to the TRX_OFF state.
-  TRX_STATE = (TRX_STATE & 0xE0) | TRX_OFF;  // Set to TRX_OFF state
-  delay(1);
-  
-  // Transceiver Status Register -- TRX_STATUS
-  // This read-only register contains the present state of the radio transceiver.
-  // After telling it to go to the TRX_OFF state, we'll make sure it's actually
-  // there.
-  if ((TRX_STATUS & 0x1F) != TRX_OFF) // Check to make sure state is correct
-    return 0;	// Error, TRX isn't off
+  rfBegin(global.rfChannel);
 
-  // Transceiver Control Register 1 - TRX_CTRL_1
-  // We'll use this register to turn on automatic CRC calculations.
-  TRX_CTRL_1 |= (1<<TX_AUTO_CRC_ON);  // Enable automatic CRC calc. 
-  
-  // Enable RX start/end and TX end interrupts
-  IRQ_MASK = (1<<RX_START_EN) | (1<<RX_END_EN) | (1<<TX_END_EN);
-  
-  // Transceiver Clear Channel Assessment (CCA) -- PHY_CC_CCA
-  // This register is used to set the channel. CCA_MODE should default
-  // to Energy Above Threshold Mode.
-  // Channel should be between 11 and 26 (2405 MHz to 2480 MHz)
-  if ((channel < 11) || (channel > 26)) channel = 11;  
-  PHY_CC_CCA = (PHY_CC_CCA & 0xE0) | channel; // Set the channel to 11
-  
-  // Finally, we'll enter into the RX_ON state. Now waiting for radio RX's, unless
-  // we go into a transmitting state.
-  TRX_STATE = (TRX_STATE & 0xE0) | RX_ON; // Default to receiver
-
-  rssiRaw=0;
-  return 1;
-}
-
-// This function sends a string of characters out of the radio.
-// Given a string, it'll format a frame, and send it out.
-void rfPrint(String toPrint)
-{
-  uint8_t frame[127];  // We'll need to turn the string into an arry
-  int length = toPrint.length();  // Get the length of the string
-  for (int i=0; i<length; i++)  // Fill our array with bytes in the string
-  {
-    frame[i] = toPrint.charAt(i);
-  }
-  
-  // Transceiver State Control Register -- TRX_STATE
-  // This regiseter controls the states of the radio.
-  // Set to the PLL_ON state - this state begins the TX.
-  TRX_STATE = (TRX_STATE & 0xE0) | PLL_ON;  // Set to TX start state
-  while(!(TRX_STATUS & PLL_ON))
-    ;  // Wait for PLL to lock
-    
-  digitalWrite(TX_LED, HIGH);
-  
-  // Start of frame buffer - TRXFBST
-  // This is the first byte of the 128 byte frame. It should contain
-  // the length of the transmission.
-  TRXFBST = length + 2;
-  memcpy((void *)(&TRXFBST+1), frame, length);
-  // Transceiver Pin Register -- TRXPR.
-  // From the PLL_ON state, setting SLPTR high will initiate the TX.
-  TRXPR |= (1<<SLPTR);   // SLPTR high
-  TRXPR &= ~(1<<SLPTR);  // SLPTR low
-  
-  // After sending the byte, set the radio back into the RX waiting state.
-  TRX_STATE = (TRX_STATE & 0xE0) | RX_ON;
-}
-
-// This function will transmit a single byte out of the radio.
-void rfWrite(uint8_t b)
-{
-  uint8_t length = 3;
-
-  // Transceiver State Control Register -- TRX_STATE
-  // This regiseter controls the states of the radio.
-  // Set to the PLL_ON state - this state begins the TX.
-  TRX_STATE = (TRX_STATE & 0xE0) | PLL_ON;  // Set to TX start state
-  while(!(TRX_STATUS & PLL_ON))
-    ;  // Wait for PLL to lock
-
-  digitalWrite(TX_LED, HIGH);  // Turn on TX LED
-
-  // Start of frame buffer - TRXFBST
-  // This is the first byte of the 128 byte frame. It should contain
-  // the length of the transmission.
-  TRXFBST = length;
-  // Now copy the byte-to-send into the address directly after TRXFBST.
-  memcpy((void *)(&TRXFBST+1), &b, 1);
-
-  // Transceiver Pin Register -- TRXPR.
-  // From the PLL_ON state, setting SLPTR high will initiate the TX.
-  TRXPR |= (1<<SLPTR);   // SLPTR = 1
-  TRXPR &= ~(1<<SLPTR);  // SLPTR = 0  // Then bring it back low
-
-  // After sending the byte, set the radio back into the RX waiting state.
-  TRX_STATE = (TRX_STATE & 0xE0) | RX_ON;
-}
-
-// Returns how many unread bytes remain in the radio RX buffer.
-// 0 means the buffer is empty. Maxes out at RF_BUFFER_SIZE.
-unsigned int rfAvailable()
-{
-  return (unsigned int)(RF_BUFFER_SIZE + radioRXBuffer.head - radioRXBuffer.tail) % RF_BUFFER_SIZE;
-}
-
-// This function reads the oldest data in the radio RX buffer.
-// If the buffer is emtpy, it'll return a 255.
-char rfRead()
-{
-  if (radioRXBuffer.head == radioRXBuffer.tail)
-  {
-    return -1;
-  }
-  else
-  {
-    // Read from the buffer tail, and update the tail pointer.
-    char c = radioRXBuffer.buffer[radioRXBuffer.tail];
-    radioRXBuffer.tail = (unsigned int)(radioRXBuffer.tail + 1) % RF_BUFFER_SIZE;
-    return c;
+  // Device is ready to go; check if this was a reboot or new use
+  strncpy((char*)global.name, "nop");
+  //setName("Bob");   // uncomment this for testing
+  //reset();
+  getName();
+  if(global.name[0]==NULL){
+    // device is unininitialized
+    submit("Hello!");
+    submit("What is your name?");
+    // TODO: fall into limited mode waiting for username and write to EEPROM
   }
 }
 
-// This interrupt is called when radio TX is complete. We'll just
-// use it to turn off our TX LED.
-ISR(TRX24_TX_END_vect)
-{
-  digitalWrite(TX_LED, LOW);
+void clearScreen(){
+  for(int i = 0; i < global.rows; i++){ submit("                       "); }
+  row = 0;
 }
 
-// This interrupt is called the moment data is received by the radio.
-// We'll use it to gather information about RSSI -- signal strength --
-// and we'll turn on the RX LED.
-ISR(TRX24_RX_START_vect)
+void getName()
 {
-  digitalWrite(RX_LED, HIGH);  // Turn receive LED on
-  rssiRaw = PHY_RSSI;  // Read in the received signal strength
-}
-
-// This interrupt is called at the end of data receipt. Here we'll gather
-// up the data received. And store it into a global variable. We'll
-// also turn off the RX LED.
-ISR(TRX24_RX_END_vect)
-{
-  uint8_t length;
-  // Maximum transmission is 128 bytes
-  uint8_t tempFrame[RF_BUFFER_SIZE];
-
-  // The received signal must be above a certain threshold.
-  if (rssiRaw & RX_CRC_VALID)
+  for(int i = 0; i < 4; i++)
   {
-    // The length of the message will be the first byte received.
-    length = TST_RX_LENGTH;
-    // The remaining bytes will be our received data.
-    memcpy(&tempFrame[0], (void*)&TRXFBST, length);
-    
-    // Now we need to collect the frame into our receive buffer.
-    //  k will be used to make sure we don't go above the length
-    //  i will make sure we don't overflow our buffer.
-    unsigned int k = 0;
-    unsigned int i = (radioRXBuffer.head + 1) % RF_BUFFER_SIZE; // Read buffer head pos and increment;
-    while ((i != radioRXBuffer.tail) && (k < length-2))
+    char nameByte = EEPROM.read(CONST_MEM_NAME+i);
+    if(nameByte >= 0x20 && nameByte <= 0x7A)
     {
-      // First, we update the buffer with the first byte in the frame
-      radioRXBuffer.buffer[radioRXBuffer.head] = tempFrame[k++];
-      radioRXBuffer.head = i; // Update the head
-      i = (i + 1) % RF_BUFFER_SIZE; // Increment i % BUFFER_SIZE
+      global.name[i] = nameByte;
+      //break;
+    }
+    else
+    {
+      global.name[i] = 0x00;
     }
   }
+  global.name[4]=0;
+}
 
-  digitalWrite(RX_LED, LOW);  // Turn receive LED off, and we're out
+void setName(char *name)
+{
+  for(int i = 0; i < 4; i++)
+  {
+    EEPROM.write(CONST_MEM_NAME+i,name[i]);
+    if(name[i] == 0x00)
+    {
+      break;
+    }
+  }
+}
+
+void resetInputBuffer()
+{
+  memcpy(global.command, ">                      ",26);
+  curs = 2;
+}
+
+void redraw()
+{
+  SRXEWriteString(0,0  ,messages[(0+row)%global.rows], FONT_LARGE, 3, 0);
+  SRXEWriteString(0,20 ,messages[(1+row)%global.rows], FONT_LARGE, 3, 0);   
+  SRXEWriteString(0,40 ,messages[(2+row)%global.rows], FONT_LARGE, 3, 0);
+  SRXEWriteString(0,60 ,messages[(3+row)%global.rows], FONT_LARGE, 3, 0);
+  SRXEWriteString(0,80 ,messages[(4+row)%global.rows], FONT_LARGE, 3, 0);
+  SRXEWriteString(0,100,messages[(5+row)%global.rows], FONT_LARGE, 3, 0); 
+  SRXEWriteString(0,120,global.command, FONT_LARGE, 3, 0);
+}
+
+void handleInput(char* cmd)
+{
+  char outbuff[26];
+  
+  if(!memcmp(cmd,"set",3))
+  {
+      char* item = strtok(cmd," ");
+      if(item){
+        item = strtok(NULL," ");
+        if(item){
+          if(!memcmp(item,"name",4)){
+            item = strtok(NULL," ");
+            setName(item);
+            snprintf(outbuff,24,"Hello '%s', welcome!",item);
+            submit(outbuff);
+            getName();
+          }else{
+            submit("Item not recognized");
+          }
+        }else{
+          submit("Malformed");
+        }
+      }
+  }else if(!memcmp(cmd,"get",3)){
+    char* item = strtok(cmd," ");
+    if(item){
+      item = strtok(NULL, " ");
+      if(item){
+        if(!memcmp(item,"name",4)){
+          submit((char*)global.name);
+        }else{
+          submit("Item not recognized");
+        }
+      }else{
+        submit("Malformed");
+      }
+    }
+    }else if(!memcmp(cmd,"hex",3)){
+    global.mode = CONST_MODE_HEX;
+    global.hexdumpaddr = 0;
+    // fill the first 6 lines of the screen
+    while(global.hexdumpaddr < (6*4))
+    {
+        readHexLine(global.hexdumpaddr);
+        global.hexdumpaddr += 4;
+    }
+  }else if(!memcmp(cmd,"rssi",4)){
+    global.mode = CONST_MODE_RSSI;
+  }else if(!memcmp(cmd,"chat",4)){
+    global.mode = CONST_MODE_CHAT;
+    global.rfChannel = 11;
+    rfBegin(global.rfChannel);
+  }else if(!memcmp(cmd,"help",4)){
+    submit("there is no help");
+  }else{
+    submit(cmd);
+  }
+}
+
+// submit(char*)
+//  Prints the designated string to the screen buffer and forces a redraw
+void submit(char* submission)
+{
+  time_loop=0; // reset the sleep timer
+  if(strlen(submission)<3)return;
+  
+  memcpy(messages[row],"                       ",24);
+  messages[row][24]=0;
+  memcpy(messages[row],submission, 24);
+  row = (row+1)%global.rows;
+  //checkCanary();
+  resetInputBuffer();
+  redraw();
+}
+
+void checkCanary()
+{
+  //if(memcmp(command+canaryOffset,"R05e",4) != 0) {
+  if(memcmp(global.canary,"R05e",4) != 0) {
+    for(int i = 0; i < 6; i++){ strcpy(messages[i],"OMGH@XXE!"); }
+    //redraw();
+  }
+}
+
+// readHexLine(uint32_t)
+//  Read 4 bytes starting from the specified address and print it to the string formatted as:
+//     <address> <hex bytes> <character bytes>
+void readHexLine(uint32_t addr)
+{
+  byte foo[4];
+  char bar[26];
+  for(int j = 0; j < 4; j++){ foo[j] = EEPROM.read(addr+j); }
+  snprintf(bar, 24, "%04x %02x%02x%02x%02x %c%c%c%c", addr, foo[0],foo[1],foo[2],foo[3], foo[0],foo[1],foo[2],foo[3]);
+  bar[24] = 0x00;
+  submit(bar);
+}
+
+void updateInputBuffer(byte k){
+  if(k >= 0x20 && k <= 0x7A){
+    //is it printable?
+    global.command[curs]=k;
+    //curs = (curs+1)%24;
+    if(curs < 31){  //22) {
+      curs++;
+    }
+  }else if(k == 0x08){
+    // backspace?
+    if(curs > 2){
+      curs--;
+    }
+    global.command[curs] = 0x20; //space is your blank character
+  }
+}
+
+// mode_hex_loop(byte)
+//  This is the loop function for when the device is in hex-dump mode.
+//  TODO:
+//    - Enable reading backwards
+void mode_hex_loop(byte k){
+  if(k){
+    readHexLine(global.hexdumpaddr);
+    if(global.hexdumpaddr <= (4*1024))
+    {
+      global.hexdumpaddr += 4;
+    }
+  }
+}
+
+// mode_console_loop(byte)
+//  This is the loop function for when the device is in console (default) mode
+void mode_console_loop(byte k){
+  if(k){
+    // submit on "return" (key right of 'Sym', box line box)
+    if(k==0x0D || k==0x03)
+    {
+      if(curs>3)
+      {
+        handleInput(global.command+2);
+        resetInputBuffer();
+      }
+    }else{
+      //update input buffer
+      updateInputBuffer(k);
+    }
+  }
+}
+
+// mode_chat_loop(byte,byte)
+//  First byte is input from the radio, second byte is from the keyboard.  Update the screen accordingly.
+void mode_chat_loop(byte r,byte k){
+
+  char outbuff[26];
+  
+  if(r){  
+    if(r=='\n')
+    {
+      submit(netbuff);
+      strncpy(netbuff,"                       ",24);
+      ncurs = 0;
+    }
+    else
+    {    
+      netbuff[ncurs]=r;
+      ncurs = (ncurs+1)%24;
+    } 
+  }
+  
+  if(k)
+  {
+    // submit on "return" (key right of 'Sym', box line box)
+    if(k==0x0D)
+    {
+      if(curs>2)
+      {
+        memset(outbuff,0,25);
+        snprintf(outbuff,24,"%s:%s\n",global.name,global.command+2);
+
+        // TODO something special with curs? set to 0 or 0xa?
+        
+        // transmit
+        for(int i=0;i<24;++i) {
+          rfWrite(outbuff[i]); 
+        }
+        rfWrite(3); // write the last byte
+        submit(outbuff);
+      }
+
+      //checkCanary();
+      resetInputBuffer();
+    }else{
+      //update input buffer
+      updateInputBuffer(k);
+    }
+  }
+}
+
+// mode_rssi_loop()
+//  This is a port of earlier RSSI code
+void mode_rssi_loop(){
+  int x;
+  int y;
+  char buf[24];
+  char buf2[12];
+  int i = global.rfChannel;
+  
+  rfBegin(i);
+  delay(100);
+
+  y=(i-11)%8*17;
+  if(i<19){ x = 0;}
+  else { x = 201; }
+  
+  if(rfAvailable())
+  {
+    while(0>rfRead()){} // burn through the reads
+  }
+  snprintf(buf,24,"Ch %d: %d  ",i,rssiRaw);
+  
+  global.rfChannel++;
+  i = global.rfChannel;
+  
+  rfBegin(i);
+  delay(100);
+
+  y=(i-11)%8*17;
+  if(i<19){ x = 0;}
+  else { x = 201; }
+  
+  if(rfAvailable())
+  {
+    while(0>rfRead()){} // burn through the reads
+  }
+  snprintf(buf2,12,"Ch %d: %d",i,rssiRaw);
+  strncat(buf,buf2,24);
+  submit(buf);
+
+  global.rfChannel++;
+  if(global.rfChannel > 26){
+    global.rfChannel = 11;
+  }
+}
+
+void loop() {
+
+  time_loop+=1;
+  if(time_loop>1000) // maybe a minute or so?
+  {
+    time_loop=0;
+    SRXESleep(); 
+  }
+
+  
+  // if we hear something on the radio, build up the net buffer
+  byte n = NULL;
+  if (rfAvailable())  
+  {
+    n = rfRead();
+  }
+
+  // otherwise, just take data from the keyboard
+  byte k = SRXEGetKey();
+  if(k){
+    if(k == CONST_KEY_EXIT){
+      global.mode = CONST_MODE_CONSOLE;
+    }else if(k == CONST_KEY_CLEAR){
+      clearScreen();
+      k = NULL;   // prevents subprograms from operating on this input
+    }
+  }
+  
+  // figure out our mode
+  switch(global.mode)
+  {
+    case CONST_MODE_HEX:
+      mode_hex_loop(k);
+      break;
+    case CONST_MODE_RSSI:
+      mode_rssi_loop();
+      break;
+    case CONST_MODE_CHAT:
+      mode_chat_loop(n,k);
+      break;
+    case CONST_MODE_CONSOLE:
+    default:
+      mode_console_loop(k);
+  }
+  redraw();
 }

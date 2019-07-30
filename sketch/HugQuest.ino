@@ -53,7 +53,6 @@ void setup() {
   resetInputBuffer();
   global.mode = CONST_MODE_CONSOLE;
   global.rfChannel = 11;
-  
   rfBegin(global.rfChannel);
 
   // set up the name in memory
@@ -63,6 +62,7 @@ void setup() {
     submit("Welcome back!");
     submit("Press % or > to submit.");
   }
+
 }
 
 void clearScreen(){
@@ -189,19 +189,12 @@ void handleInput(char* cmd)
         readHexLine(global.hexdumpaddr);
         global.hexdumpaddr += 4;
     }
-  }else if(!memcmp(cmd,"rssi",4)){
-    global.mode = CONST_MODE_RSSI;
-  }else if(!memcmp(cmd,"chat",4)){
-    global.mode = CONST_MODE_CHAT;
-    global.rfChannel = 11;
-    rfBegin(global.rfChannel);
-  }else if(!memcmp(cmd,"help",4)){
-    submit("there is no help");
-  }else if(!memcmp(cmd,"resetforreals",13)){
-    reset();
-  }else if(!memcmp(cmd,"reset",5)){
-    submit("Try 'resetforreals'");
-  }else if(!memcmp(cmd,"ascii",4)){
+  }
+  else if(!memcmp(cmd,"rssi",4)){global.mode = CONST_MODE_RSSI;}
+  else if(!memcmp(cmd,"help",4)){submit("there is no help");}
+  else if(!memcmp(cmd,"resetforreals",13)){reset();}
+  else if(!memcmp(cmd,"reset",5)){submit("Try 'resetforreals'");}
+  else if(!memcmp(cmd,"ascii",4)){
     char outbuff[24];
     for(int x=0;x<256;++x)
     {
@@ -209,8 +202,31 @@ void handleInput(char* cmd)
       delay(1000);
       submit(outbuff);
     }
-  }else{
-    submit(cmd);
+  }
+  else if(!memcmp(cmd,"hug",3))
+  {
+    rfWrite('h');
+    rfWrite('u');
+    rfWrite('g');
+    rfWrite('\n'); // write the last byte
+    submit("Hug sent!!");
+  }
+
+  // doesn't look like a command, so let's blast it to the chat!
+  else
+  {
+    char outputbuff[26];
+    
+    memset(outbuff,0,25);
+    snprintf(outbuff,24,"%-3s:%s.",global.name,global.command+2);
+ 
+    // transmit
+    for(int i=0;i<curs+2;++i){
+      rfWrite(outbuff[i]);
+    }
+    rfWrite('\n'); // write the last byte
+        
+    submit(outbuff);
   }
 }
 
@@ -289,33 +305,15 @@ void mode_hex_loop(byte k){
 
 // mode_console_loop(byte)
 //  This is the loop function for when the device is in console (default) mode
-void mode_console_loop(byte k){
-  if(k){
-    // submit on "return" (key right of 'Sym', box line box)
-    if(k==0x0D || k==0x03)
-    {
-      if(curs>3)
-      {
-        handleInput(global.command+2);
-        resetInputBuffer();
-      }
-    }else{
-      //update input buffer
-      updateInputBuffer(k);
-    }
-  }
-}
+void mode_console_loop(byte r, byte k){
 
-// mode_chat_loop(byte,byte)
-//  First byte is input from the radio, second byte is from the keyboard.  Update the screen accordingly.
-void mode_chat_loop(byte r,byte k){
-
-  char outbuff[26];
-  
   if(r){  
     if(r=='\n')
     {
-      submit(netbuff);
+      // HERE IS WHERE WE ACCEPT COMMANDS FROM THE NETWORK
+      if(!memcmp(netbuff,"hug",3)){submit("OMG YOU'VE BEEN HUGGED!");}
+      else if(!memcmp(netbuff,"wannahug",8)){submit("OH NO HAX!");}
+      else submit(netbuff);
       strncpy(netbuff,"                       ",24);
       ncurs = 0;
     }
@@ -326,27 +324,16 @@ void mode_chat_loop(byte r,byte k){
     } 
   }
   
-  if(k)
-  {
+  
+  if(k){
     // submit on "return" (key right of 'Sym', box line box)
-    if(k==0x0D)
+    if(k==0x0D || k==0x03)
     {
-      if(curs>2)
+      if(curs>3)
       {
-        memset(outbuff,0,25);
-        snprintf(outbuff,24,"%-3s:%s.",global.name,global.command+2);
- 
-        // transmit
-        for(int i=0;i<curs+2;++i) {
-          rfWrite(outbuff[i]);
-        }
-        rfWrite('\n'); // write the last byte
-        
-        submit(outbuff);
+        handleInput(global.command+2);
+        resetInputBuffer();
       }
-
-      //checkCanary();
-      resetInputBuffer();
     }else{
       //update input buffer
       updateInputBuffer(k);
@@ -403,7 +390,7 @@ void mode_rssi_loop(){
 void loop() {
 
   time_loop+=1;
-  if(time_loop>100000) // maybe a minute or so?
+  if(time_loop>50000) // maybe a minute or so?
   {
     time_loop=0;
     SRXESleep();
@@ -413,10 +400,10 @@ void loop() {
 
   
   // if we hear something on the radio, build up the net buffer
-  byte n = NULL;
+  byte r = NULL;
   if (rfAvailable())  
   {
-    n = rfRead();
+    r = rfRead();
   }
 
   // otherwise, just take data from the keyboard
@@ -439,12 +426,9 @@ void loop() {
     case CONST_MODE_RSSI:
       mode_rssi_loop();
       break;
-    case CONST_MODE_CHAT:
-      mode_chat_loop(n,k);
-      break;
     case CONST_MODE_CONSOLE:
     default:
-      mode_console_loop(k);
+      mode_console_loop(r,k);
   }
   //redraw();
 }

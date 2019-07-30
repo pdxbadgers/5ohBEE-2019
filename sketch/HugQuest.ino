@@ -230,11 +230,12 @@ void readHexLine(uint32_t addr)
 void updateInputBuffer(byte k){
   if(k >= 0x20 && k <= 0x7A){
     //is it printable?
-    global.command[curs]=k;
-    //curs = (curs+1)%24;
-    if(curs < 31){  //22) {
+    if(curs <= 20)
+    {
+      global.command[curs]=k;
       curs++;
     }
+    
   }else if(k == 0x08){
     // backspace?
     if(curs > 2){
@@ -307,15 +308,14 @@ void mode_chat_loop(byte r,byte k){
       if(curs>2)
       {
         memset(outbuff,0,25);
-        snprintf(outbuff,24,"%s:%s\n",global.name,global.command+2);
-
-        // TODO something special with curs? set to 0 or 0xa?
-        
+        snprintf(outbuff,24,"%s:%s.",global.name,global.command+2);
+ 
         // transmit
-        for(int i=0;i<24;++i) {
-          rfWrite(outbuff[i]); 
+        for(int i=0;i<curs+2;++i) {
+          rfWrite(outbuff[i]);
         }
-        rfWrite(3); // write the last byte
+        rfWrite('\n'); // write the last byte
+        
         submit(outbuff);
       }
 

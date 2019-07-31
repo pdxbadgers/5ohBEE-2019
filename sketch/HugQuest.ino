@@ -126,7 +126,7 @@ int getName()
 
 int setName(char *name)
 {
-  if(strlen(name)<0||strlen(name)>3)
+  if(strlen(name)<=0||strlen(name)>3)
   {
     submit("NAME MUST BE 1-3 CHARS!");
     return false;

@@ -171,7 +171,8 @@ void handleInput(char* cmd)
       if(item){
         item = strtok(NULL," ");
         if(item){
-          if(!memcmp(item,"name",4)){
+          if(!memcmp(item,"name",4))
+          {
             item = strtok(NULL," ");
             if(setName(item))
             {
@@ -179,11 +180,33 @@ void handleInput(char* cmd)
               submit(outbuff);
             }
             //getName();
-          }else{
+          }
+          else if(!memcmp(item,"channel",7))
+          {
+            item = strtok(NULL," ");
+            int newchan=atoi(item);
+            if(newchan>=11 && newchan<=26)
+            {
+              global.rfChannel = newchan;
+              rfBegin(global.rfChannel);
+ 
+              snprintf(outbuff,24,"Radio on channel %d",global.rfChannel);
+              submit(outbuff); 
+            }
+            else
+            {
+              submit("Channel must be 11-26");
+            }
+          }
+          else if(!memcmp(item,"tokens",6))
+          {
+            submit("No.");
+          }
+          else{
             submit("Item not recognized");
           }
         }else{
-          submit("Malformed");
+          submit("Set what? name channel");
         }
       }
   }else if(!memcmp(cmd,"get",3)){
@@ -201,6 +224,11 @@ void handleInput(char* cmd)
           snprintf(outbuff,20,"Timer is at %lu",time_loop);
           submit(outbuff);
         }
+        else if(!memcmp(item,"channel",7))
+        {
+          snprintf(outbuff,20,"Radio on channel %d",global.rfChannel);
+          submit(outbuff);
+        }
         else if(!memcmp(item,"tokens",6))
         {
           snprintf(outbuff,24,"You have %lu HUG tokens.",tokens);
@@ -212,7 +240,8 @@ void handleInput(char* cmd)
           submit("Item not recognized");
         }
       }else{
-        submit("Malformed");
+        submit("Get what?");
+        submit("name channel tokens");
       }
     }
     }else if(!memcmp(cmd,"hex",3)){
@@ -226,7 +255,14 @@ void handleInput(char* cmd)
     }
   }
   else if(!memcmp(cmd,"rssi",4)){global.mode = CONST_MODE_RSSI;}
-  else if(!memcmp(cmd,"help",4)){submit("there is no help");}
+  else if(!memcmp(cmd,"help",4))
+  {
+    submit("Try get set hug");
+    if(tokens>=100)
+    {
+      submit(" also 'WANNAHUG'..");
+    }
+  }
   else if(!memcmp(cmd,"resetforreals",13)){reset();}
   else if(!memcmp(cmd,"reset",5)){submit("Try 'resetforreals'");}
   else if(!memcmp(cmd,"ascii",4)){
@@ -251,7 +287,19 @@ void handleInput(char* cmd)
       EEPROM.put(CONST_MEM_HUGS,tokens);
     }
   }
-
+  else if(!memcmp(cmd,"WANNAHUG",8))
+  {
+    rfWrite('h');
+    rfWrite('a');
+    rfWrite('x');
+    rfWrite('\n'); // write the last byte
+    submit("WANNAHUG sent!!");
+    if(tokens>0)
+    {
+      tokens=tokens-1;
+      EEPROM.put(CONST_MEM_HUGS,tokens);
+    }
+  }
   // doesn't look like a command, so let's blast it to the chat!
   else
   {

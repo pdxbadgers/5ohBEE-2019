@@ -349,8 +349,6 @@ int submit(char* submission)
   messages[row][24]=0;
   memcpy(messages[row],submission, 24);
   row = (row+1)%global.rows;
-  //checkCanary();
-  resetInputBuffer();
   redraw();
 }
 

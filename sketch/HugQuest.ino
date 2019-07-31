@@ -1,6 +1,7 @@
 #include <SmartResponseXE.h>
 #include "RadioFunctions.h"
 #include <EEPROM.h>
+#include <avr/wdt.h>
 
 char messages[6][26];
 char command[32] = ">                      \x00R05e\x00";
@@ -60,6 +61,9 @@ void setup() {
   global.mode = CONST_MODE_CONSOLE;
   global.rfChannel = 11;
   rfBegin(global.rfChannel);
+
+  // set up the watchdog timer
+  wdt_enable(WDTO_8S);
 
   // set up the name in memory
   if(getName())
@@ -529,11 +533,17 @@ void mode_rssi_loop(){
 
 void loop() {
 
+  // reset the watchdog
+  wdt_reset();
+
+  // increment the sleep timer
   time_loop+=1;
   if(time_loop>50000) // maybe a minute or so?
   {
     time_loop=0;
+    wdt_disable();
     SRXESleep();
+    wdt_enable(WDTO_8S);
     redraw();
     resetInputBuffer();
   }

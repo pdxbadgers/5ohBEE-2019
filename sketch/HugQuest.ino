@@ -268,7 +268,8 @@ void handleInput(char* cmd)
   else if(!memcmp(cmd,"rssi",4)){global.mode = CONST_MODE_RSSI;}
   else if(!memcmp(cmd,"help",4))
   {
-    submit("Try get set hug");
+    submit("Basic commands:");
+    submit(" get, set, hug");
     if(tokens>=100)
     {
       submit(" also 'WANNAHUG'..");
@@ -276,6 +277,7 @@ void handleInput(char* cmd)
   }
   else if(!memcmp(cmd,"resetforreals",13)){reset();}
   else if(!memcmp(cmd,"reset",5)){submit("Try 'resetforreals'");}
+  else if(!memcmp(cmd,"version",7)){submit("HugQuest v1.1");}
   else if(!memcmp(cmd,"ascii",5)){
     for(int x=0;x<256;++x)
     {

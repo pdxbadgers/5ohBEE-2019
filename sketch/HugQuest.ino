@@ -89,7 +89,7 @@ int getName()
   // flash is totally empty, welcome the new user!
   if(EEPROM.read(CONST_MEM_NAME)==255)
   {
-    submit("Welcome to HugQuest v0.1");
+    submit("Welcome to HugQuest v1.0");
     submit("What is your name?");
     submit("type 'set name <name>'");
     submit("Press % or > to submit.");
@@ -209,7 +209,7 @@ void handleInput(char* cmd)
             submit("No.");
           }
           else{
-            submit("Item not recognized");
+            submit("Set what? name channel");
           }
         }else{
           submit("Set what? name channel");

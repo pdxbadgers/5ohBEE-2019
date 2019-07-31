@@ -248,7 +248,8 @@ void handleInput(char* cmd)
 
         else
         {
-          submit("Item not recognized");
+          submit("Get what?");
+          submit("name channel tokens");
         }
       }else{
         submit("Get what?");

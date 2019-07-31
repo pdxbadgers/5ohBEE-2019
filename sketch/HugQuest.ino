@@ -93,7 +93,8 @@ int getName()
   // flash is totally empty, welcome the new user!
   if(EEPROM.read(CONST_MEM_NAME)==255)
   {
-    submit("Welcome to HugQuest v1.0");
+    clearScreen();
+    submit("Welcome to HugQuest v1.1");
     submit("What is your name?");
     submit("type 'set name <name>'");
     submit("Press % or > to submit.");
@@ -322,6 +323,9 @@ void handleInput(char* cmd)
   // doesn't look like a command, so let's blast it to the chat!
   else
   {
+    // make sure they have their name set
+    if(!getName())return;
+    
     char outputbuff[26];
     
     memset(outbuff,0,25);
@@ -461,7 +465,7 @@ void mode_console_loop(byte r, byte k){
           resetInputBuffer();
           return;
         }
-        
+
         handleInput(global.command+2);
         resetInputBuffer();
       }

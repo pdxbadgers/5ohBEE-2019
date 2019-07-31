@@ -13,6 +13,9 @@ uint8_t canaryOffset = 27;
 unsigned long int time_loop=0;
 unsigned long int tokens=0;
 
+int infected=false;
+char outbuff[26];
+
 // Operation mode constants
 #define CONST_MODE_CONSOLE  0
 #define CONST_MODE_HEX      1
@@ -26,6 +29,7 @@ unsigned long int tokens=0;
 // EEPROM constants
 #define CONST_MEM_NAME 0x0000000
 #define CONST_MEM_HUGS 0x0000100
+#define CONST_MEM_HACK 0x0000200
 
 struct global_t{
   int mode = CONST_MODE_CONSOLE;
@@ -57,11 +61,15 @@ void setup() {
   global.rfChannel = 11;
   rfBegin(global.rfChannel);
 
-  char outbuff[26];
-
   // set up the name in memory
   if(getName())
   {
+
+    if(infected)
+    {
+      omghax();
+      return;
+    }
     snprintf(outbuff,24,"Welcome back %s!",global.name);
     submit(outbuff);
 
@@ -78,8 +86,6 @@ void clearScreen(){
 
 int getName()
 {
-  char outbuff[26];
-
   // flash is totally empty, welcome the new user!
   if(EEPROM.read(CONST_MEM_NAME)==255)
   {
@@ -89,11 +95,13 @@ int getName()
     submit("Press % or > to submit.");
 
     EEPROM.put(CONST_MEM_HUGS,(unsigned long)0);
+    EEPROM.put(CONST_MEM_HACK,(int)0);
     return false;
   }
 
   // how many tokens we got?
   EEPROM.get(CONST_MEM_HUGS,tokens);
+  EEPROM.get(CONST_MEM_HACK,infected);
   
   for(int i = 0; i < 4; i++)
   {
@@ -163,8 +171,6 @@ void redraw()
 
 void handleInput(char* cmd)
 {
-  char outbuff[26];
-  
   if(!memcmp(cmd,"set",3))
   {
       char* item = strtok(cmd," ");
@@ -265,13 +271,27 @@ void handleInput(char* cmd)
   }
   else if(!memcmp(cmd,"resetforreals",13)){reset();}
   else if(!memcmp(cmd,"reset",5)){submit("Try 'resetforreals'");}
-  else if(!memcmp(cmd,"ascii",4)){
-    char outbuff[24];
+  else if(!memcmp(cmd,"ascii",5)){
     for(int x=0;x<256;++x)
     {
       snprintf(outbuff,20,"%02x %03d : %c",x,x,x);
       delay(1000);
       submit(outbuff);
+    }
+  }
+  else if(!memcmp(cmd,"unlock",6))
+  {
+    if(tokens>=10)
+    {
+      tokens-=10;
+      infected=false;
+      EEPROM.put(CONST_MEM_HACK,infected);
+      EEPROM.put(CONST_MEM_HUGS,tokens);
+      submit("SYSTEM UNLOCKED");      
+    }
+    else
+    {
+      submit("You need more HUGs");
     }
   }
   else if(!memcmp(cmd,"hug",3))
@@ -294,11 +314,6 @@ void handleInput(char* cmd)
     rfWrite('x');
     rfWrite('\n'); // write the last byte
     submit("WANNAHUG sent!!");
-    if(tokens>0)
-    {
-      tokens=tokens-1;
-      EEPROM.put(CONST_MEM_HUGS,tokens);
-    }
   }
   // doesn't look like a command, so let's blast it to the chat!
   else
@@ -405,7 +420,12 @@ void mode_console_loop(byte r, byte k){
         tokens=tokens+1;
         EEPROM.put(CONST_MEM_HUGS,tokens);
       }
-      else if(!memcmp(netbuff,"wannahug",8)){submit("OH NO HAX!");}
+      else if(!memcmp(netbuff,"hax",3))
+      {
+        omghax();
+        infected=true;
+        EEPROM.put(CONST_MEM_HACK,infected);
+      }
       else submit(netbuff);
       strncpy(netbuff,"                       ",24);
       ncurs = 0;
@@ -424,6 +444,22 @@ void mode_console_loop(byte r, byte k){
     {
       if(curs>3)
       {
+        if(infected==true)
+        {
+          // while infected, special case to unlock
+          if(!memcmp(global.command+2,"unlock",6))
+          {
+            handleInput(global.command+2);
+            resetInputBuffer();
+            return;
+          }
+          
+          omghax();
+          
+          resetInputBuffer();
+          return;
+        }
+        
         handleInput(global.command+2);
         resetInputBuffer();
       }
@@ -432,6 +468,17 @@ void mode_console_loop(byte r, byte k){
       updateInputBuffer(k);
     }
   }
+}
+
+void omghax()
+{
+  clearScreen();
+  submit("YOU HAVE BEEN INFECTED");
+  submit("WITH ** WANNAHUG **");
+  submit("YOU MUST PAY 10 HUG");
+  snprintf(outbuff,24,"You have %lu HUG tokens.",tokens);
+  submit(outbuff);
+  submit("Type 'unlock' when ready");
 }
 
 // mode_rssi_loop()

@@ -270,7 +270,7 @@ void handleInput(char* cmd)
   else if(!memcmp(cmd,"help",4))
   {
     submit("Basic commands:");
-    submit(" get, set, hug");
+    submit(" get set hug mine");
     if(tokens>=100)
     {
       submit(" also 'WANNAHUG'..");
@@ -302,6 +302,16 @@ void handleInput(char* cmd)
       submit("You need more HUGs");
     }
   }
+  else if(!memcmp(cmd,"mine",4))
+  {
+    unsigned int mined = time_loop/10000;
+    
+    tokens = tokens+mined;
+    EEPROM.put(CONST_MEM_HUGS,tokens);
+
+    snprintf(outbuff,24,"Mined %u HUG tokens.",mined);
+    submit(outbuff);
+  }
   else if(!memcmp(cmd,"hug",3))
   {
     rfWrite('h');
@@ -317,6 +327,12 @@ void handleInput(char* cmd)
   }
   else if(!memcmp(cmd,"WANNAHUG",8))
   {
+    if(tokens<100)
+    {
+      submit("Who told you that cmd?");
+      return;
+    }
+    
     rfWrite('h');
     rfWrite('a');
     rfWrite('x');

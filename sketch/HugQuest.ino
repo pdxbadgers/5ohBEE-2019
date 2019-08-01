@@ -3,6 +3,7 @@
 #include <EEPROM.h>
 #include <avr/wdt.h>
 
+char version[20]="HugQuest v1.3";
 char messages[6][26];
 char command[32] = ">                      \x00R05e\x00";
 char netbuff[26] = "";
@@ -94,7 +95,7 @@ int getName()
   if(EEPROM.read(CONST_MEM_NAME)==255)
   {
     clearScreen();
-    submit("Welcome to HugQuest v1.1");
+    submit(version);
     submit("What is your name?");
     submit("type 'set name <name>'");
     submit("Press % or > to submit.");
@@ -278,7 +279,7 @@ void handleInput(char* cmd)
   }
   else if(!memcmp(cmd,"resetforreals",13)){reset();}
   else if(!memcmp(cmd,"reset",5)){submit("Try 'resetforreals'");}
-  else if(!memcmp(cmd,"version",7)){submit("HugQuest v1.1");}
+  else if(!memcmp(cmd,"version",7)){submit(version);}
   else if(!memcmp(cmd,"ascii",5)){
     for(int x=0;x<256;++x)
     {

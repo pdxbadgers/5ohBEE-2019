@@ -3,7 +3,7 @@
 #include <EEPROM.h>
 #include <avr/wdt.h>
 
-char version[20]="HugQuest v1.4";
+char version[20]="HugQuest v1.5";
 char messages[6][26];
 char command[32] = ">                      \x00R05e\x00";
 char netbuff[26] = "";
@@ -279,7 +279,7 @@ void handleInput(char* cmd)
   else if(!memcmp(cmd,"help",4))
   {
     submit("Basic commands:");
-    submit(" get set hug mine");
+    submit(" get set hug mine rssi");
     if(tokens>=100)
     {
       submit(" also 'WANNAHUG'..");

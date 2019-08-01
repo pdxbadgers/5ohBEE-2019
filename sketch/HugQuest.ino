@@ -3,7 +3,7 @@
 #include <EEPROM.h>
 #include <avr/wdt.h>
 
-char version[20]="HugQuest v1.3";
+char version[20]="HugQuest v1.4";
 char messages[6][26];
 char command[32] = ">                      \x00R05e\x00";
 char netbuff[26] = "";
@@ -267,7 +267,12 @@ void handleInput(char* cmd)
         global.hexdumpaddr += 4;
     }
   }
-  else if(!memcmp(cmd,"rssi",4)){global.mode = CONST_MODE_RSSI;}
+  else if(!memcmp(cmd,"rssi",4))
+  {
+    global.mode = CONST_MODE_RSSI;
+    SRXEPowerDown();
+    SRXEPowerUp();
+  }
   else if(!memcmp(cmd,"help",4))
   {
     submit("Basic commands:");
@@ -510,14 +515,16 @@ void omghax()
 // mode_rssi_loop()
 //  This is a port of earlier RSSI code
 void mode_rssi_loop(){
-  int x;
-  int y;
-  char buf[24];
-  char buf2[12];
-  int i = global.rfChannel;
-  
+
+time_loop = 0;
+
+int x;
+int y;
+
+for(int i=11;i<=26;++i)
+{
   rfBegin(i);
-  delay(100);
+  delay(10);
 
   y=(i-11)%8*17;
   if(i<19){ x = 0;}
@@ -526,32 +533,20 @@ void mode_rssi_loop(){
   if(rfAvailable())
   {
     while(0>rfRead()){} // burn through the reads
+    snprintf(outbuff,24,"Ch %d : %d   ",i,rssiRaw);
+    SRXEWriteString(x,y ,outbuff, FONT_LARGE, 3, 0);
+  
   }
-  snprintf(buf,24,"Ch %d: %d  ",i,rssiRaw);
-  
-  global.rfChannel++;
-  i = global.rfChannel;
-  
-  rfBegin(i);
-  delay(100);
-
-  y=(i-11)%8*17;
-  if(i<19){ x = 0;}
-  else { x = 201; }
-  
-  if(rfAvailable())
+  else
   {
-    while(0>rfRead()){} // burn through the reads
+    snprintf(outbuff,24,"Ch %d : %d   ",i,rssiRaw);
+    SRXEWriteString(x,y ,outbuff, FONT_LARGE, 3, 0);
   }
-  snprintf(buf2,12,"Ch %d: %d",i,rssiRaw);
-  strncat(buf,buf2,24);
-  submit(buf);
 
-  global.rfChannel++;
-  if(global.rfChannel > 26){
-    global.rfChannel = 11;
-  }
-}
+  // point out the "back" button
+  SRXEWriteString(360,120 ,"back", FONT_SMALL, 3, 0);
+
+}}
 
 void loop() {
 
@@ -582,6 +577,8 @@ void loop() {
   byte k = SRXEGetKey();
   if(k){
     if(k == CONST_KEY_EXIT){
+      SRXEPowerDown();
+      SRXEPowerUp();
       global.mode = CONST_MODE_CONSOLE;
     }else if(k == CONST_KEY_CLEAR){
       clearScreen();

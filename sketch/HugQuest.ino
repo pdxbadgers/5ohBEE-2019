@@ -12,6 +12,8 @@ int ncurs = 0;
 int row=0;
 uint8_t canaryOffset = 27;
 
+uint8_t rssi[32]; // yeah, what of it?
+
 unsigned long int time_loop=0;
 unsigned long int tokens=0;
 
@@ -269,6 +271,7 @@ void handleInput(char* cmd)
   }
   else if(!memcmp(cmd,"rssi",4))
   {
+    for(int i=0;i<30;++i)rssi[i]=0;
     global.mode = CONST_MODE_RSSI;
     SRXEPowerDown();
     SRXEPowerUp();
@@ -516,15 +519,15 @@ void omghax()
 //  This is a port of earlier RSSI code
 void mode_rssi_loop(){
 
-time_loop = 0;
+ time_loop = 0;
 
-int x;
-int y;
+ int x;
+ int y;
 
-for(int i=11;i<=26;++i)
-{
-  rfBegin(i);
-  delay(10);
+ for(int i=11;i<=26;++i)
+ {
+  rfBegin(i); // change channel
+  delay(100);
 
   y=(i-11)%8*17;
   if(i<19){ x = 0;}
@@ -533,20 +536,16 @@ for(int i=11;i<=26;++i)
   if(rfAvailable())
   {
     while(0>rfRead()){} // burn through the reads
-    snprintf(outbuff,24,"Ch %d : %d   ",i,rssiRaw);
-    SRXEWriteString(x,y ,outbuff, FONT_LARGE, 3, 0);
+    rssi[i]+=rssiRaw;
+  }
   
-  }
-  else
-  {
-    snprintf(outbuff,24,"Ch %d : %d   ",i,rssiRaw);
-    SRXEWriteString(x,y ,outbuff, FONT_LARGE, 3, 0);
-  }
+  snprintf(outbuff,24,"Ch %d : %d",i,rssi[i]);
+  SRXEWriteString(x,y ,outbuff, FONT_LARGE, 3, 0);
 
-  // point out the "back" button
-  SRXEWriteString(360,120 ,"back", FONT_SMALL, 3, 0);
-
-}}
+ }
+ // point out the "back" button
+ SRXEWriteString(360,120 ,"back", FONT_SMALL, 3, 0);
+}
 
 void loop() {
 
